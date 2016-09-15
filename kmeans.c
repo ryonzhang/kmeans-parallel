@@ -69,8 +69,8 @@ void average_each_cluster(Vector *centers, int k, Vector *points,
     int counts[k];
     int i;
     for (i = 0; i < k; i++) {
-	x_sums[i] = 0.0;
-	y_sums[i] = 0.0;
+	x_sums[i] = 0;
+	y_sums[i] = 0;
 	counts[i] = 0;
     }
 
@@ -104,10 +104,12 @@ void average_each_cluster(Vector *centers, int k, Vector *points,
  */
 int centers_changed(Vector *centers, int k) {
     int changed = 0;
+    double epsilon = 0.001;
     int i;
     for (i = 0; i < k; i++) {
-	if (centers[i].x != _centers[i].x
-	    && centers[i].y != _centers[i].y) {
+	double x_diff = abs(centers[i].x - _centers[i].x);
+	double y_diff = abs(centers[i].y - _centers[i].y);
+	if (x_diff > epsilon || y_diff > epsilon) {
 	    changed = 1;
 	}
 
