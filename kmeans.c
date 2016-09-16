@@ -1,17 +1,23 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
+#include <unistd.h>
 #include <math.h>
 #include <float.h>
 #include <string.h>
 
-typedef struct {  /* A 2D vector */
+
+typedef struct {    /* A 2D vector */
     double x;
     double y;
     int cluster;
 } Vector;
 
 
-Vector *_centers; /* Global array of centers */
+int     _k = 4;            /* Number of clusters */
+double  _threshold = 0.01; /* Threshold for convergence */
+char*   _inputfile;        /* Input file to read from */
+Vector* _centers;          /* Global array of centers */
 
 
 /*
@@ -30,10 +36,10 @@ Vector random_center(int cluster) {
 /*
  * Create the initial, random centers
  */
-void init_centers(int k, Vector *points, int num_points,
-		    Vector *centers) { 
+void init_centers(Vector *points, int num_points,
+		   Vector *centers) { 
     int i;
-    for (i = 0; i < k; i++) {
+    for (i = 0; i < _k; i++) {
 	centers[i] = random_center(i);
     }
 }
@@ -41,11 +47,11 @@ void init_centers(int k, Vector *points, int num_points,
 /*
  * Find the nearest center for each point
  */
-void find_nearest_center(Vector *centers, int k, Vector *point) {
+void find_nearest_center(Vector *centers, Vector *point) {
     double distance = DBL_MAX;
     int cluster_idx = 0;
     int i;
-    for (i = 0; i < k; i++) {
+    for (i = 0; i < _k; i++) {
 	Vector center = centers[i];
 	double d = sqrt(pow(center.x - point->x, 2.0)
 			       + pow(center.y - point->y, 2.0));
@@ -61,14 +67,14 @@ void find_nearest_center(Vector *centers, int k, Vector *point) {
 /*
  * Average each cluster and update their centers
  */
-void average_each_cluster(Vector *centers, int k, Vector *points,
-			  int num_points) {
+void average_each_cluster(Vector *centers, Vector *points,
+			    int num_points) {
     /* Initialize the arrays */
-    double x_sums[k];
-    double y_sums[k];
-    int counts[k];
+    double x_sums[_k];
+    double y_sums[_k];
+    int counts[_k];
     int i;
-    for (i = 0; i < k; i++) {
+    for (i = 0; i < _k; i++) {
 	x_sums[i] = 0;
 	y_sums[i] = 0;
 	counts[i] = 0;
@@ -83,7 +89,7 @@ void average_each_cluster(Vector *centers, int k, Vector *points,
     }
 
     /* Average each cluster and update their centers */
-    for (i = 0; i < k; i++) {
+    for (i = 0; i < _k; i++) {
 	if (counts[i] != 0) {
 	    double x_avg = x_sums[i] / counts[i];
 	    double y_avg = y_sums[i] / counts[i];
@@ -98,18 +104,14 @@ void average_each_cluster(Vector *centers, int k, Vector *points,
 
 /*
  * Check if the centers have changed
- * 
- * Chris' suggestion: Add a margin of error
- * when comparing centers
  */
-int centers_changed(Vector *centers, int k) {
+int centers_changed(Vector *centers) {
     int changed = 0;
-    double epsilon = 0.001;
     int i;
-    for (i = 0; i < k; i++) {
+    for (i = 0; i < _k; i++) {
 	double x_diff = abs(centers[i].x - _centers[i].x);
 	double y_diff = abs(centers[i].y - _centers[i].y);
-	if (x_diff > epsilon || y_diff > epsilon) {
+	if (x_diff > _threshold || y_diff > _threshold) {
 	    changed = 1;
 	}
 
@@ -123,46 +125,66 @@ int centers_changed(Vector *centers, int k) {
 /*
  * Compute k-means and print out the centers
  */
-void kmeans(int k, Vector *points, int num_points) {
-    Vector centers[k];
-    init_centers(k, points, num_points, centers);
+void kmeans(Vector *points, int num_points) {
+    Vector centers[_k];
+    init_centers(points, num_points, centers);
 
     /* While the centers have moved, re-cluster 
 	the points and compute the averages */
     int max_itr = 10;
     int itr = 0;
-    while (centers_changed(centers, k) && itr < max_itr) {
+    while (centers_changed(centers) && itr < max_itr) {
 	int i;
 	for (i = 0; i < num_points; i++) {
-	    find_nearest_center(centers, k, &points[i]);
+	    find_nearest_center(centers, &points[i]);
 	}
 
-	average_each_cluster(centers, k, points, num_points);
+	average_each_cluster(centers, points, num_points);
 	itr++;
     }
     printf("Converged in %d iterations (max=%d)\n", itr, max_itr);
     
     /* Print the center of each cluster */
     int j;
-    for (j = 0; j < k; j++) {
+    for (j = 0; j < _k; j++) {
 	printf("Cluster %d center: x=%f, y=%f\n",
 	       j, _centers[j].x, _centers[j].y);
     }
 }
 
-void main (int argc, char** argv) {
-    _centers = malloc(sizeof(Vector) * 4);
-    Vector points[100];
-
-    int i;
-    for (i = 0; i < 100; i++) {
-	Vector v;
-	v.x = (double) (rand() % 100);
-	v.y = (double) (rand() % 100);
-	v.cluster = 0;
-	points[i] = v;
-    }
-    kmeans(4, points, 100);
+void main (int argc, char *const *argv) {
+    char *usage = "Usage: ./kmeans [-k clusters] [-t threshold]"
+	          " [-i inputfile]";
     
-    free((void*) _centers);
+    size_t len;
+    int opt;
+    while ((opt = getopt(argc, argv, "k:t:i:")) != -1) {
+	switch (opt) {
+	case 'k':
+	    _k = atoi(optarg);
+	    break;
+	case 't':
+	    _threshold = atof(optarg);
+	    break;
+	case 'i':
+	    len = strlen(optarg);
+	    _inputfile = (char*) malloc(len + 1);
+	    strcpy(_inputfile, optarg);
+	    break;
+	default:
+	    fprintf(stderr, "%s\n", usage);
+	    exit(EXIT_FAILURE);
+	}
+    }
+
+    if (_inputfile != NULL) {
+	_centers = malloc(sizeof(Vector) * _k);
+
+	free(_inputfile);
+	free(_centers);
+    } else {
+	fprintf(stderr, "%s\n", usage);
+    }
+    
+    exit(EXIT_SUCCESS);
 }
