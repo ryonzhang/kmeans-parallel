@@ -16,9 +16,10 @@ typedef struct {    /* A 2D vector */
 
 int     _k = 4;            /* Number of clusters */
 double  _threshold = 0.01; /* Threshold for convergence */
-char*   _inputfile;        /* Input file to read from */
+char*   _inputname;        /* Input filename to read from */
 Vector* _centers;          /* Global array of centers */
-
+Vector* _points;           /* Global array of 2D data points */
+int     _numpoints;        /* Number of 2D data points */
 
 /*
  * Return a random point to be associated
@@ -152,10 +153,25 @@ void kmeans(Vector *points, int num_points) {
     }
 }
 
-void main (int argc, char *const *argv) {
-    char *usage = "Usage: ./kmeans [-k clusters] [-t threshold]"
-	          " [-i inputfile]";
+/*
+ * Read data points from the input file
+ */
+void read_inputfile(char *inputname) {
+    if (_inputname == NULL) {
+	printf("Must provide an input filename\n");
+	exit(EXIT_FAILURE);
+    }
     
+    FILE *inputfile = fopen(_inputname, "r");
+    if (inputfile == NULL) {
+	fprintf(stderr, "Invalid filename\n");
+	exit(EXIT_FAILURE);
+    }
+
+    int status = fclose(inputfile);
+}
+
+void main (int argc, char *const *argv) {
     size_t len;
     int opt;
     while ((opt = getopt(argc, argv, "k:t:i:")) != -1) {
@@ -168,23 +184,18 @@ void main (int argc, char *const *argv) {
 	    break;
 	case 'i':
 	    len = strlen(optarg);
-	    _inputfile = (char*) malloc(len + 1);
-	    strcpy(_inputfile, optarg);
+	    _inputname = (char*) malloc(len + 1);
+	    strcpy(_inputname, optarg);
 	    break;
 	default:
-	    fprintf(stderr, "%s\n", usage);
+	    fprintf(stderr, "Usage: %s [-k clusters] [-t threshold]"
+                            " [-i inputfile]\n", argv[0]);
 	    exit(EXIT_FAILURE);
 	}
     }
 
-    if (_inputfile != NULL) {
-	_centers = malloc(sizeof(Vector) * _k);
-
-	free(_inputfile);
-	free(_centers);
-    } else {
-	fprintf(stderr, "%s\n", usage);
-    }
+    read_inputfile(_inputname);
+    /* kmeans(); */
     
     exit(EXIT_SUCCESS);
 }
