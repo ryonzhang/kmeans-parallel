@@ -37,8 +37,7 @@ Vector random_center(int cluster) {
 /*
  * Create the initial, random centers
  */
-void init_centers(Vector *points, int num_points,
-		   Vector *centers) { 
+void init_centers(Vector *centers) { 
     int i;
     for (i = 0; i < _k; i++) {
 	centers[i] = random_center(i);
@@ -68,8 +67,7 @@ void find_nearest_center(Vector *centers, Vector *point) {
 /*
  * Average each cluster and update their centers
  */
-void average_each_cluster(Vector *centers, Vector *points,
-			    int num_points) {
+void average_each_cluster(Vector *centers) {
     /* Initialize the arrays */
     double x_sums[_k];
     double y_sums[_k];
@@ -82,8 +80,8 @@ void average_each_cluster(Vector *centers, Vector *points,
     }
 
     /* Sum up and count each cluster */
-    for (i = 0; i < num_points; i++) {
-	Vector point = points[i];
+    for (i = 0; i < _numpoints; i++) {
+	Vector point = _points[i];
 	x_sums[point.cluster] += point.x;
 	y_sums[point.cluster] += point.y;
 	counts[point.cluster] += 1;
@@ -126,9 +124,9 @@ int centers_changed(Vector *centers) {
 /*
  * Compute k-means and print out the centers
  */
-void kmeans(Vector *points, int num_points) {
+void kmeans() {
     Vector centers[_k];
-    init_centers(points, num_points, centers);
+    init_centers(centers);
 
     /* While the centers have moved, re-cluster 
 	the points and compute the averages */
@@ -136,11 +134,11 @@ void kmeans(Vector *points, int num_points) {
     int itr = 0;
     while (centers_changed(centers) && itr < max_itr) {
 	int i;
-	for (i = 0; i < num_points; i++) {
-	    find_nearest_center(centers, &points[i]);
+	for (i = 0; i < _numpoints; i++) {
+	    find_nearest_center(centers, &_points[i]);
 	}
 
-	average_each_cluster(centers, points, num_points);
+	average_each_cluster(centers);
 	itr++;
     }
     printf("Converged in %d iterations (max=%d)\n", itr, max_itr);
