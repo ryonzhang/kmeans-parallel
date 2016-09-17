@@ -21,6 +21,7 @@ Vector* _centers;          /* Global array of centers */
 Vector* _points;           /* Global array of 2D data points */
 int     _numpoints;        /* Number of 2D data points */
 
+
 /*
  * Return a random point to be associated
  * with a cluster
@@ -156,17 +157,27 @@ void kmeans() {
  */
 void read_inputfile(char *inputname) {
     if (_inputname == NULL) {
-	printf("Must provide an input filename\n");
+	fprintf(stderr, "Must provide an input filename\n");
+	free(_inputname);
 	exit(EXIT_FAILURE);
     }
     
     FILE *inputfile = fopen(_inputname, "r");
     if (inputfile == NULL) {
 	fprintf(stderr, "Invalid filename\n");
+	free(_inputname);
 	exit(EXIT_FAILURE);
     }
 
-    int status = fclose(inputfile);
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read;
+    while ((read = getline(&line, &len, inputfile)) != -1) {
+	printf("%s", line);
+    }
+    free(line);
+
+    fclose(inputfile);
 }
 
 void main (int argc, char *const *argv) {
@@ -194,6 +205,7 @@ void main (int argc, char *const *argv) {
 
     read_inputfile(_inputname);
     /* kmeans(); */
-    
+
+    free(_inputname);
     exit(EXIT_SUCCESS);
 }
