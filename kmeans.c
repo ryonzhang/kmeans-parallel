@@ -27,12 +27,10 @@ int     _numpoints;        /* Number of 2D data points */
  * with a cluster
  */
 Vector random_center(int cluster) {
-    Vector point;
-    point.x = rand() % 100;
-    point.y = rand() % 100;
-    point.cluster = cluster;
+    /* Vector *point = &_points[rand() % _numpoints];
+       point->cluster = cluster; */
 
-    return point;
+    return _points[rand() % _numpoints];
 }
 
 /*
@@ -123,8 +121,8 @@ int centers_changed(Vector *centers) {
     int changed = 0;
     int i;
     for (i = 0; i < _k; i++) {
-	double x_diff = abs(centers[i].x - _centers[i].x);
-	double y_diff = abs(centers[i].y - _centers[i].y);
+	double x_diff = fabs(centers[i].x - _centers[i].x);
+	double y_diff = fabs(centers[i].y - _centers[i].y);
 	if (x_diff > _threshold || y_diff > _threshold) {
 	    changed = 1;
 	}
