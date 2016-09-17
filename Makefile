@@ -1,8 +1,8 @@
-all: kmeans
+all: kmeans-serial
 
-kmeans: kmeans.c
-	gcc kmeans.c -lm -o kmeans
+kmeans-serial: kmeans-serial.c
+	gcc kmeans-serial.c -lm -o kmeans-serial
 
 clean:
-	rm kmeans
+	rm kmeans-serial
 
