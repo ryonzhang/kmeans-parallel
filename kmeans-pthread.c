@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <unistd.h>
-#include <errno.h>
 #include <pthread.h>
 #include <math.h>
 #include <float.h>
@@ -16,17 +15,17 @@ typedef struct {    /* A 2D vector */
 } Vector;
 
 
-int         _numthreads = 2;   /* Number of pthreads */
-int         _k = 4;            /* Number of clusters */
-double      _threshold = 0.05; /* Threshold for convergence */
-char*       _inputname;        /* Input filename to read from */
-Vector*     _centers;          /* Cluster centers */
-Vector*     _points;           /* 2D data points */
-pthread_t*  _threads;          /* pthreads */
-int         _numpoints;        /* Number of 2D data points */
-double*     _xsums;            /* x-axis sum for each cluster */
-double*     _ysums;            /* y-axis sum for each cluster */
-int*        _counts;           /* Count for each cluster */
+int         _k = 4;              /* Number of clusters */
+int         _numthreads = 2;     /* Number of pthreads */
+int         _numpoints;          /* Number of 2D data points */
+double      _threshold = 0.05;   /* Threshold for convergence */
+char*       _inputname;          /* Input filename to read from */
+Vector*     _centers;            /* Cluster centers */
+Vector*     _points;             /* 2D data points */
+pthread_t*  _threads;            /* pthreads */
+double*     _xsums;              /* x-axis sum for each cluster */
+double*     _ysums;              /* y-axis sum for each cluster */
+int*        _counts;             /* Count for each cluster */
 
 
 /*
@@ -239,8 +238,6 @@ int centers_changed(Vector *centers) {
 
     return changed;
 }
-
-
 
 /*
  * Compute k-means and print out the centers
