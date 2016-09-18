@@ -27,6 +27,81 @@ int         _numpoints;        /* Number of 2D data points */
 
 
 /*
+ * Initialize the array of pthreads */
+void init_threads() {
+    _threads = malloc(sizeof(pthread_t) * _numthreads);
+
+    int i;
+    for (i = 0; i < _numthreads; i++) {
+	pthread_t thread;
+	_threads[i] = thread;
+    }
+}
+
+
+/*
+ * Read data points from the input file
+ */
+void init_points(char *inputname) {
+    _centers = malloc(sizeof(Vector) * _k);
+    
+    /* Open the input file */
+    if (_inputname == NULL) {
+	fprintf(stderr, "Must provide an input filename\n");
+	free(_inputname);
+	free(_centers);
+	exit(EXIT_FAILURE);
+    }
+    
+    FILE *inputfile = fopen(_inputname, "r");
+    if (inputfile == NULL) {
+	fprintf(stderr, "Invalid filename\n");
+	free(_inputname);
+	free(_centers);
+	exit(EXIT_FAILURE);
+    }
+
+    /* Read the line count */
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read = getline(&line, &len, inputfile);
+    _numpoints = atoi(line);
+    _points = malloc(sizeof(Vector) * _numpoints);
+
+    /* Read each data point in */
+    while ((read = getline(&line, &len, inputfile)) != -1) {
+	char *saveptr;
+	char *token;
+	token = strtok_r(line, " ", &saveptr);
+	int i = atoi(token) - 1;
+	
+	token = strtok_r(NULL, " ", &saveptr);
+	double x = atof(token);
+
+	token = strtok_r(NULL, " ", &saveptr);
+	double y = atof(token);
+
+	_points[i].x = x;
+	_points[i].y = y;
+	_points[i].cluster = 0;
+    }
+
+    free(line);
+    fclose(inputfile);
+}
+
+/*
+ * Create the initial, random centers
+ */
+void init_centers(Vector *centers) { 
+    int i;
+    for (i = 0; i < _k; i++) {
+	_centers[i] = zero_center(i);
+	centers[i] = random_center(i);
+    }
+}
+
+/*
  * Return a random center to be associated
  * with a cluster
  */
@@ -45,17 +120,6 @@ Vector zero_center(int cluster) {
     point.cluster = cluster;
 
     return point;
-}
-
-/*
- * Create the initial, random centers
- */
-void init_centers(Vector *centers) { 
-    int i;
-    for (i = 0; i < _k; i++) {
-	_centers[i] = zero_center(i);
-	centers[i] = random_center(i);
-    }
 }
 
 /*
@@ -167,13 +231,15 @@ int centers_changed(Vector *centers) {
     return changed;
 }
 
+
+
 /*
  * Compute k-means and print out the centers
  */
 void kmeans() {
     Vector centers[_k];
     init_centers(centers);
-
+    
     /* While the centers have moved, re-cluster 
 	the points and compute the averages */
     int max_itr = 10;
@@ -194,57 +260,6 @@ void kmeans() {
 	printf("Cluster %d center: x=%f, y=%f\n",
 	       j, _centers[j].x, _centers[j].y);
     }
-}
-
-/*
- * Read data points from the input file
- */
-void read_inputfile(char *inputname) {
-    _centers = malloc(sizeof(Vector) * _k);
-    
-    /* Open the input file */
-    if (_inputname == NULL) {
-	fprintf(stderr, "Must provide an input filename\n");
-	free(_inputname);
-	free(_centers);
-	exit(EXIT_FAILURE);
-    }
-    
-    FILE *inputfile = fopen(_inputname, "r");
-    if (inputfile == NULL) {
-	fprintf(stderr, "Invalid filename\n");
-	free(_inputname);
-	free(_centers);
-	exit(EXIT_FAILURE);
-    }
-
-    /* Read the line count */
-    char *line = NULL;
-    size_t len = 0;
-    ssize_t read = getline(&line, &len, inputfile);
-    _numpoints = atoi(line);
-    _points = malloc(sizeof(Vector) * _numpoints);
-
-    /* Read each data point in */
-    while ((read = getline(&line, &len, inputfile)) != -1) {
-	char *saveptr;
-	char *token;
-	token = strtok_r(line, " ", &saveptr);
-	int i = atoi(token) - 1;
-	
-	token = strtok_r(NULL, " ", &saveptr);
-	double x = atof(token);
-
-	token = strtok_r(NULL, " ", &saveptr);
-	double y = atof(token);
-
-	_points[i].x = x;
-	_points[i].y = y;
-	_points[i].cluster = 0;
-    }
-
-    free(line);
-    fclose(inputfile);
 }
 
 void main (int argc, char *const *argv) {
@@ -272,9 +287,9 @@ void main (int argc, char *const *argv) {
 	    exit(EXIT_FAILURE);
 	}
     }
-    _threads = malloc(sizeof(pthread_t) * _numthreads);
-    
-    read_inputfile(_inputname);
+
+    init_points();
+    init_threads();    
     kmeans();
 
     free(_inputname);
