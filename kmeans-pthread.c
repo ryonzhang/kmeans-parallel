@@ -20,14 +20,18 @@ int         _numthreads = 2;   /* Number of pthreads */
 int         _k = 4;            /* Number of clusters */
 double      _threshold = 0.05; /* Threshold for convergence */
 char*       _inputname;        /* Input filename to read from */
-Vector*     _centers;          /* Global array of centers */
-Vector*     _points;           /* Global array of 2D data points */
-pthread_t*  _threads;          /* Global array of pthreads */
+Vector*     _centers;          /* Cluster centers */
+Vector*     _points;           /* 2D data points */
+pthread_t*  _threads;          /* pthreads */
 int         _numpoints;        /* Number of 2D data points */
+double*     _xsums;            /* x-axis sum for each cluster */
+double*     _ysums;            /* y-axis sum for each cluster */
+int*        _counts;           /* Count for each cluster */
 
 
 /*
- * Initialize the array of pthreads */
+ * Initialize the array of pthreads
+ */
 void init_threads() {
     _threads = malloc(sizeof(pthread_t) * _numthreads);
 
@@ -38,11 +42,10 @@ void init_threads() {
     }
 }
 
-
 /*
  * Read data points from the input file
  */
-void init_points(char *inputname) {
+void init_points() {
     _centers = malloc(sizeof(Vector) * _k);
     
     /* Open the input file */
@@ -91,17 +94,6 @@ void init_points(char *inputname) {
 }
 
 /*
- * Create the initial, random centers
- */
-void init_centers(Vector *centers) { 
-    int i;
-    for (i = 0; i < _k; i++) {
-	_centers[i] = zero_center(i);
-	centers[i] = random_center(i);
-    }
-}
-
-/*
  * Return a random center to be associated
  * with a cluster
  */
@@ -120,6 +112,17 @@ Vector zero_center(int cluster) {
     point.cluster = cluster;
 
     return point;
+}
+
+/*
+ * Create the initial, random centers
+ */
+void init_centers(Vector *centers) { 
+    int i;
+    for (i = 0; i < _k; i++) {
+	_centers[i] = zero_center(i);
+	centers[i] = random_center(i);
+    }
 }
 
 /*
@@ -146,16 +149,18 @@ void find_nearest_center(Vector *centers, Vector *point) {
  * Sum up a chunk of the points and update 
  * the cluster counts
  */
-void *sum_chunk(void *arg) {
-    /*
-    int i;
-    for (i = start; i < end; i++) {
-	Vector point = _points[i];
-	x_sums[point.cluster] += point.x;
-	y_sums[point.cluster] += point.y;
-	counts[point.cluster] += 1;
+void *sum_chunk(void *chunk_idx) {
+    int i = *(int*) chunk_idx;
+    int start = i * (_numpoints / _numthreads);
+    int end = (i + 1) * (_numpoints / _numthreads);
+    
+    int cur;
+    for (cur = start; cur < end; cur++) {
+	Vector point = _points[cur];
+        _xsums[point.cluster] += point.x;
+	_ysums[point.cluster] += point.y;
+	_counts[point.cluster] += 1;
     }
-    */
 
     pthread_exit(NULL);
 }
@@ -165,21 +170,21 @@ void *sum_chunk(void *arg) {
  */
 void average_each_cluster(Vector *centers) {
     /* Initialize the arrays */
-    double x_sums[_k];
-    double y_sums[_k];
-    int counts[_k];
-    int i;
+    _xsums = malloc(sizeof(double) * _k);
+    _ysums = malloc(sizeof(double) * _k);
+    _counts = malloc(sizeof(int) * _k);
 
+    int i;
     for (i = 0; i < _k; i++) {
-	x_sums[i] = 0;
-	y_sums[i] = 0;
-	counts[i] = 0;
+	_xsums[i] = 0;
+	_ysums[i] = 0;
+	_counts[i] = 0;
     }
 
     /* Create some pthreads */
     for (i = 0; i < _numthreads; i++) {
 	int success = pthread_create(&_threads[i], NULL,
-				     sum_chunk, NULL);
+				     sum_chunk, &i);
 	
 	if (success != 0) {
 	    fprintf(stderr, "Couldn't create a pthread\n");
@@ -199,16 +204,20 @@ void average_each_cluster(Vector *centers) {
 
     /* Average each cluster and update their centers */
     for (i = 0; i < _k; i++) {
-	if (counts[i] == 0) {
+	if (_counts[i] == 0) {
 	    centers[i].x = 0;
 	    centers[i].y = 0;
 	} else {
-	    double x_avg = x_sums[i] / counts[i];
-	    double y_avg = y_sums[i] / counts[i];
+	    double x_avg = _xsums[i] / _counts[i];
+	    double y_avg = _ysums[i] / _counts[i];
 	    centers[i].x = x_avg;
 	    centers[i].y = y_avg;
 	}
     }
+
+    free(_xsums);
+    free(_ysums);
+    free(_counts);
 }
 
 /*
