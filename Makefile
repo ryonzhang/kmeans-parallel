@@ -1,12 +1,12 @@
-all: kmeans-serial kmeans-fork
+all: kmeans-serial kmeans-pthread
 
 kmeans-serial: kmeans-serial.c
 	gcc kmeans-serial.c -lm -o kmeans-serial
 
-kmeans-fork: kmeans-fork.c
-	gcc kmeans-fork.c -lm -o kmeans-fork
+kmeans-pthread: kmeans-pthread.c
+	gcc kmeans-pthread.c -pthread -lm -o kmeans-pthread
 
 clean:
 	rm kmeans-serial
-	rm kmeans-fork
+	rm kmeans-pthread
 

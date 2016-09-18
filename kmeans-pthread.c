@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <unistd.h>
+#include <errno.h>
+#include <pthread.h>
 #include <math.h>
 #include <float.h>
 #include <string.h>
@@ -14,12 +16,14 @@ typedef struct {    /* A 2D vector */
 } Vector;
 
 
-int     _k = 4;            /* Number of clusters */
-double  _threshold = 0.05; /* Threshold for convergence */
-char*   _inputname;        /* Input filename to read from */
-Vector* _centers;          /* Global array of centers */
-Vector* _points;           /* Global array of 2D data points */
-int     _numpoints;        /* Number of 2D data points */
+int         _numthreads = 2;   /* Number of pthreads */
+int         _k = 4;            /* Number of clusters */
+double      _threshold = 0.05; /* Threshold for convergence */
+char*       _inputname;        /* Input filename to read from */
+Vector*     _centers;          /* Global array of centers */
+Vector*     _points;           /* Global array of 2D data points */
+pthread_t*  _threads;          /* Global array of pthreads */
+int         _numpoints;        /* Number of 2D data points */
 
 
 /*
@@ -27,9 +31,6 @@ int     _numpoints;        /* Number of 2D data points */
  * with a cluster
  */
 Vector random_center(int cluster) {
-    /* Vector *point = &_points[rand() % _numpoints];
-       point->cluster = cluster; */
-
     return _points[rand() % _numpoints];
 }
 
@@ -78,6 +79,24 @@ void find_nearest_center(Vector *centers, Vector *point) {
 }
 
 /*
+ * Sum up a chunk of the points and update 
+ * the cluster counts
+ */
+void *sum_chunk(void *arg) {
+    /*
+    int i;
+    for (i = start; i < end; i++) {
+	Vector point = _points[i];
+	x_sums[point.cluster] += point.x;
+	y_sums[point.cluster] += point.y;
+	counts[point.cluster] += 1;
+    }
+    */
+
+    pthread_exit(NULL);
+}
+
+/*
  * Average each cluster and update their centers
  */
 void average_each_cluster(Vector *centers) {
@@ -86,30 +105,44 @@ void average_each_cluster(Vector *centers) {
     double y_sums[_k];
     int counts[_k];
     int i;
+
     for (i = 0; i < _k; i++) {
 	x_sums[i] = 0;
 	y_sums[i] = 0;
 	counts[i] = 0;
     }
 
-    /* Sum up and count each cluster */
-    for (i = 0; i < _numpoints; i++) {
-	Vector point = _points[i];
-	x_sums[point.cluster] += point.x;
-	y_sums[point.cluster] += point.y;
-	counts[point.cluster] += 1;
+    /* Create some pthreads */
+    for (i = 0; i < _numthreads; i++) {
+	int success = pthread_create(&_threads[i], NULL,
+				     sum_chunk, NULL);
+	
+	if (success != 0) {
+	    fprintf(stderr, "Couldn't create a pthread\n");
+	    exit(EXIT_FAILURE);
+	}
+    }
+
+    /* Wait for the pthreads to exit */
+    for (i = 0; i < _numthreads; i++) {
+	int success = pthread_join(_threads[i], NULL);
+	
+	if (success != 0) {
+	    fprintf(stderr, "Couldn't join a pthread\n");
+	    exit(EXIT_FAILURE);
+	}
     }
 
     /* Average each cluster and update their centers */
     for (i = 0; i < _k; i++) {
-	if (counts[i] != 0) {
+	if (counts[i] == 0) {
+	    centers[i].x = 0;
+	    centers[i].y = 0;
+	} else {
 	    double x_avg = x_sums[i] / counts[i];
 	    double y_avg = y_sums[i] / counts[i];
 	    centers[i].x = x_avg;
 	    centers[i].y = y_avg;
-	} else {
-	    centers[i].x = 0;
-	    centers[i].y = 0;
 	}
     }
 }
@@ -150,7 +183,6 @@ void kmeans() {
 	for (i = 0; i < _numpoints; i++) {
 	    find_nearest_center(centers, &_points[i]);
 	}
-
 	average_each_cluster(centers);
 	itr++;
     }
@@ -169,7 +201,7 @@ void kmeans() {
  */
 void read_inputfile(char *inputname) {
     _centers = malloc(sizeof(Vector) * _k);
-
+    
     /* Open the input file */
     if (_inputname == NULL) {
 	fprintf(stderr, "Must provide an input filename\n");
@@ -210,7 +242,7 @@ void read_inputfile(char *inputname) {
 	_points[i].y = y;
 	_points[i].cluster = 0;
     }
-    
+
     free(line);
     fclose(inputfile);
 }
@@ -222,10 +254,12 @@ void main (int argc, char *const *argv) {
 	switch (opt) {
 	case 'k':
 	    _k = atoi(optarg);
-	    _centers = malloc(sizeof(Vector) * _k);
 	    break;
 	case 't':
 	    _threshold = atof(optarg);
+	    break;
+	case 'p':
+	    _numthreads = atoi(optarg);
 	    break;
 	case 'i':
 	    len = strlen(optarg);
@@ -238,12 +272,14 @@ void main (int argc, char *const *argv) {
 	    exit(EXIT_FAILURE);
 	}
     }
-
+    _threads = malloc(sizeof(pthread_t) * _numthreads);
+    
     read_inputfile(_inputname);
     kmeans();
 
     free(_inputname);
     free(_centers);
     free(_points);
+    free(_threads);    
     exit(EXIT_SUCCESS);
 }
