@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -181,6 +182,8 @@ void *sum_chunk(void *idx_ptr) {
  */
 void create_chunk_threads() {
     int i, s;
+    cpu_set_t cpuset;
+    
     for (i = 0; i < _numthreads; i++) {
 	int *idx_ptr = (int *) malloc(sizeof(int));
 	*idx_ptr = i;
@@ -188,6 +191,14 @@ void create_chunk_threads() {
 	s = pthread_create(&_threads[i], NULL, sum_chunk, idx_ptr);
 	if (s != 0) {
 	    fprintf(stderr, "Couldn't create a pthread\n");
+	    exit(EXIT_FAILURE);
+	}
+
+	CPU_ZERO(&cpuset);
+	CPU_SET(i, &cpuset);
+	s = pthread_setaffinity_np(_threads[i], sizeof(cpu_set_t), &cpuset);
+	if (s != 0) {
+	    fprintf(stderr, "Couldn't set the affinity of a pthread\n");
 	    exit(EXIT_FAILURE);
 	}
     }
@@ -198,6 +209,7 @@ void create_chunk_threads() {
  */
 void join_chunk_threads() {
     int i, s;
+    
     for (i = 0; i < _numthreads; i++) {
 	s = pthread_join(_threads[i], NULL);
 	if (s != 0) {
