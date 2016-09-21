@@ -93,6 +93,16 @@ void init_points() {
 }
 
 /*
+ * Initialize the arrays used to average 
+ * the data points
+ */
+void init_avg_arrays() {
+    _xsums = malloc(sizeof(double) * _k);
+    _ysums = malloc(sizeof(double) * _k);
+    _counts = malloc(sizeof(int) * _k);
+}
+
+/*
  * Return a random center to be associated
  * with a cluster
  */
@@ -148,8 +158,8 @@ void find_nearest_center(Vector *centers, Vector *point) {
  * Sum up a chunk of the points and update 
  * the cluster counts
  */
-void *sum_chunk(void *chunk_idx) {
-    int i = *(int*) chunk_idx;
+void *sum_chunk(void *idx_ptr) {
+    int i = *(int *) idx_ptr;
     int start = i * (_numpoints / _numthreads);
     int end = (i + 1) * (_numpoints / _numthreads);
     
@@ -161,18 +171,47 @@ void *sum_chunk(void *chunk_idx) {
 	_counts[point.cluster] += 1;
     }
 
+    free(idx_ptr);
     pthread_exit(NULL);
+}
+
+/*
+ * Create some pthreads that will each sum up
+ * a chunk of the data points ("chunk" threads)
+ */
+void create_chunk_threads() {
+    int i, s;
+    for (i = 0; i < _numthreads; i++) {
+	int *idx_ptr = (int *) malloc(sizeof(int));
+	*idx_ptr = i;
+	
+	s = pthread_create(&_threads[i], NULL, sum_chunk, idx_ptr);
+	if (s != 0) {
+	    fprintf(stderr, "Couldn't create a pthread\n");
+	    exit(EXIT_FAILURE);
+	}
+    }
+}
+
+/*
+ * Join the chunk threads
+ */
+void join_chunk_threads() {
+    int i, s;
+    for (i = 0; i < _numthreads; i++) {
+	s = pthread_join(_threads[i], NULL);
+	if (s != 0) {
+	    fprintf(stderr, "Couldn't join a pthread\n");
+	    exit(EXIT_FAILURE);
+	}
+    }
 }
 
 /*
  * Average each cluster and update their centers
  */
 void average_each_cluster(Vector *centers) {
-    /* Initialize the arrays */
-    _xsums = malloc(sizeof(double) * _k);
-    _ysums = malloc(sizeof(double) * _k);
-    _counts = malloc(sizeof(int) * _k);
-
+    /* Zero out the arrays used for averaging */
     int i;
     for (i = 0; i < _k; i++) {
 	_xsums[i] = 0;
@@ -180,26 +219,9 @@ void average_each_cluster(Vector *centers) {
 	_counts[i] = 0;
     }
 
-    /* Create some pthreads */
-    for (i = 0; i < _numthreads; i++) {
-	int success = pthread_create(&_threads[i], NULL,
-				     sum_chunk, &i);
-	
-	if (success != 0) {
-	    fprintf(stderr, "Couldn't create a pthread\n");
-	    exit(EXIT_FAILURE);
-	}
-    }
-
-    /* Wait for the pthreads to exit */
-    for (i = 0; i < _numthreads; i++) {
-	int success = pthread_join(_threads[i], NULL);
-	
-	if (success != 0) {
-	    fprintf(stderr, "Couldn't join a pthread\n");
-	    exit(EXIT_FAILURE);
-	}
-    }
+    /* Create some pthreads to sum up the points */
+    create_chunk_threads();
+    join_chunk_threads();
 
     /* Average each cluster and update their centers */
     for (i = 0; i < _k; i++) {
@@ -213,10 +235,6 @@ void average_each_cluster(Vector *centers) {
 	    centers[i].y = y_avg;
 	}
     }
-
-    free(_xsums);
-    free(_ysums);
-    free(_counts);
 }
 
 /*
@@ -271,7 +289,7 @@ void kmeans() {
 void main (int argc, char *const *argv) {
     size_t len;
     int opt;
-    while ((opt = getopt(argc, argv, "k:t:i:")) != -1) {
+    while ((opt = getopt(argc, argv, "k:t:p:i:")) != -1) {
 	switch (opt) {
 	case 'k':
 	    _k = atoi(optarg);
@@ -295,12 +313,17 @@ void main (int argc, char *const *argv) {
     }
 
     init_points();
-    init_threads();    
+    init_threads();
+    init_avg_arrays();
+
     kmeans();
 
     free(_inputname);
     free(_centers);
     free(_points);
-    free(_threads);    
+    free(_threads);
+    free(_xsums);
+    free(_ysums);
+    free(_counts);
     exit(EXIT_SUCCESS);
 }
