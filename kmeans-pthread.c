@@ -16,23 +16,25 @@ typedef struct {    /* A 2D vector */
 } Vector;
 
 
-int         _k = 4;              /* Number of clusters */
-int         _numthreads = 2;     /* Number of pthreads */
-int         _numpoints;          /* Number of 2D data points */
-double      _threshold = 0.05;   /* Threshold for convergence */
-char*       _inputname;          /* Input filename to read from */
-Vector*     _centers;            /* Cluster centers */
-Vector*     _points;             /* 2D data points */
-pthread_t*  _threads;            /* pthreads */
-double*     _xsums;              /* x-axis sum for each cluster */
-double*     _ysums;              /* y-axis sum for each cluster */
-int*        _counts;             /* Count for each cluster */
+int               _k = 4;              /* Number of clusters */
+int               _numthreads = 2;     /* Number of pthreads */
+int               _numpoints;          /* Number of 2D data points */
+double            _threshold = 0.05;   /* Threshold for convergence */
+pthread_barrier_t _barrier;            /* Barrier for the pthreads */
+char*             _inputname;          /* Input filename to read from */
+Vector*           _centers;            /* Cluster centers */
+Vector*           _points;             /* 2D data points */
+pthread_t*        _threads;            /* pthreads used for averaging */
+double*           _xsums;              /* x-axis sum for each cluster */
+double*           _ysums;              /* y-axis sum for each cluster */
+int*              _counts;             /* Count for each cluster */
 
 
 /*
  * Initialize the array of pthreads
  */
 void init_threads() {
+    pthread_barrier_init(&_barrier, NULL, _numthreads + 1);
     _threads = malloc(sizeof(pthread_t) * _numthreads);
 
     int i;
@@ -40,6 +42,7 @@ void init_threads() {
 	pthread_t thread;
 	_threads[i] = thread;
     }
+
 }
 
 /*
@@ -173,12 +176,12 @@ void *sum_chunk(void *idx_ptr) {
     }
 
     free(idx_ptr);
-    pthread_exit(NULL);
+    pthread_barrier_wait(&_barrier);
 }
 
 /*
  * Create some pthreads that will each sum up
- * a chunk of the data points ("chunk" threads)
+ * a chunk of the data points
  */
 void create_chunk_threads() {
     int i, s;
@@ -205,21 +208,6 @@ void create_chunk_threads() {
 }
 
 /*
- * Join the chunk threads
- */
-void join_chunk_threads() {
-    int i, s;
-    
-    for (i = 0; i < _numthreads; i++) {
-	s = pthread_join(_threads[i], NULL);
-	if (s != 0) {
-	    fprintf(stderr, "Couldn't join a pthread\n");
-	    exit(EXIT_FAILURE);
-	}
-    }
-}
-
-/*
  * Average each cluster and update their centers
  */
 void average_each_cluster(Vector *centers) {
@@ -233,7 +221,7 @@ void average_each_cluster(Vector *centers) {
 
     /* Create some pthreads to sum up the points */
     create_chunk_threads();
-    join_chunk_threads();
+    pthread_barrier_wait(&_barrier);
 
     /* Average each cluster and update their centers */
     for (i = 0; i < _k; i++) {
