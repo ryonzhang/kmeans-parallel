@@ -27,88 +27,26 @@ pthread_barrier_t _barrierA;           /* Barrier for averaging */
 pthread_barrier_t _barrierB;           /* Barrier for convergence */
 pthread_barrier_t _barrierC;           /* Barrier for finishing */
 char*             _inputname;          /* Input filename to read from */
-Vector*           _centers;            /* Cluster centers for each thread */
-Vector*           _tmpcenters;         /* Temporary centers for each iteration */
+Vector*           _centers;            /* Cluster centers */
+Vector*           _tmpcenters;         /* Temporary cluster centers */
 Vector*           _points;             /* 2D data points */
-Vector**          _aggregates;         /* Temporary aggregates for each thread */
+Vector**          _threadsums;         /* 2D array for er-thread cluster sums */
 pthread_t*        _threads;            /* pthreads used for averaging */
 
-
-/*
- * Initialize the array of pthreads
- */
-void init_threads() {
-    pthread_barrier_init(&_barrierA, NULL, _numthreads);
-    pthread_barrier_init(&_barrierB, NULL, _numthreads);
-    pthread_barrier_init(&_barrierC, NULL, _numthreads + 1);
-    _threads = malloc(sizeof(pthread_t) * _numthreads);
-
-    int i;
-    for (i = 0; i < _numthreads; i++) {
-	pthread_t thread;
-	_threads[i] = thread;
-    }
-}
-
-/*
- * Initialize the 2D array for per-thread
- * averaging
- */
-void init_aggregates() {
-    _aggregates = malloc(sizeof(Vector *) * _numthreads);
-
-    int i;
-    for (i = 0; i < _numthreads; i++) {
-	_aggregates[i] = malloc(sizeof(Vector) * _k);
-    }
-}
-
-/*
- * Free the 2D array for per-thread 
- * averaging
- */
-void free_aggregates() {
-    int i;
-    for (i = 0; i < _numthreads; i++) {
-	free(_aggregates[i]);
-    }
-
-    free(_aggregates);
-}
-
-/*
- * Reset the per-iteration array
- * of centers
- */
-void reset_tmpcenters() {
-    int i;
-    for (i = 0; i < _k; i++) {
-	_tmpcenters[i].x = 0;
-	_tmpcenters[i].y = 0;
-	_tmpcenters[i].cluster = 0;
-    }
-}
 
 /*
  * Read data points from the input file
  */
 void init_points() {
-    _centers = malloc(sizeof(Vector) * _k);
-    _tmpcenters = malloc(sizeof(Vector) * _k);
-    
     /* Open the input file */
     if (_inputname == NULL) {
 	fprintf(stderr, "Must provide an input filename\n");
-	free(_inputname);
-	free(_centers);
 	exit(EXIT_FAILURE);
     }
     
     FILE *inputfile = fopen(_inputname, "r");
     if (inputfile == NULL) {
 	fprintf(stderr, "Invalid filename\n");
-	free(_inputname);
-	free(_centers);
 	exit(EXIT_FAILURE);
     }
 
@@ -137,8 +75,25 @@ void init_points() {
 	_points[i].cluster = 0;
     }
 
+    free(_inputname);
     free(line);
     fclose(inputfile);
+}
+
+/*
+ * Initialize the array of pthreads
+ */
+void init_threads() {
+    pthread_barrier_init(&_barrierA, NULL, _numthreads);
+    pthread_barrier_init(&_barrierB, NULL, _numthreads);
+    pthread_barrier_init(&_barrierC, NULL, _numthreads + 1);
+    _threads = malloc(sizeof(pthread_t) * _numthreads);
+
+    int i;
+    for (i = 0; i < _numthreads; i++) {
+	pthread_t thread;
+	_threads[i] = thread;
+    }
 }
 
 /*
@@ -146,7 +101,10 @@ void init_points() {
  * with a cluster
  */
 Vector random_center(int cluster) {
-    return _points[rand() % _numpoints];
+    Vector *point = &_points[rand() % _numpoints];
+    point->cluster = cluster;
+
+    return *point;
 }
 
 /*
@@ -165,11 +123,76 @@ Vector zero_center(int cluster) {
 /*
  * Create the initial, random centers
  */
-void init_centers() { 
+void init_centers() {
+    _centers = malloc(sizeof(Vector) * _k);
+    _tmpcenters = malloc(sizeof(Vector) * _k);
+ 
     int i;
     for (i = 0; i < _k; i++) {
 	_centers[i] = random_center(i);
 	_tmpcenters[i] = zero_center(i);
+    }
+}
+
+/*
+ * Initialize the 2D array for per-thread
+ * cluster sums
+ */
+void init_threadsums() {
+    _threadsums = malloc(sizeof(Vector *) * _numthreads);
+
+    int i;
+    for (i = 0; i < _numthreads; i++) {
+	_threadsums[i] = malloc(sizeof(Vector) * _k);
+    }
+}
+
+/*
+ * Free the array of data points
+ */
+void free_points() {
+    free(_points);
+}
+
+/*
+ * Free the array of pthreads
+ */
+void free_threads() {
+    free(_threads);
+}
+
+/*
+ * Free the final array of centers and 
+ * the per-iteration array of centers
+ */
+void free_centers() {
+    free(_tmpcenters);
+    free(_centers);
+}
+
+/*
+ * Free the 2D array for per-thread 
+ * cluster sums
+ */
+void free_threadsums() {
+    int i;
+    for (i = 0; i < _numthreads; i++) {
+	free(_threadsums[i]);
+    }
+
+    free(_threadsums);
+}
+
+/*
+ * Reset the per-iteration array
+ * of centers
+ */
+void reset_tmpcenters() {
+    int i;
+    for (i = 0; i < _k; i++) {
+	_tmpcenters[i].x = 0;
+	_tmpcenters[i].y = 0;
+	_tmpcenters[i].cluster = 0;
     }
 }
 
@@ -223,13 +246,13 @@ void average_each_cluster(int thread_idx) {
     /* Average each cluster and update their centers */
     for (i = 0; i < _k; i++) {
 	if (counts[i] == 0) {
-	    _aggregates[thread_idx][i].x = 0;
-	    _aggregates[thread_idx][i].y = 0;
+	    _threadsums[thread_idx][i].x = 0;
+	    _threadsums[thread_idx][i].y = 0;
 	} else {
 	    double xavg = xsums[i] / counts[i];
 	    double yavg = ysums[i] / counts[i];
-	    _aggregates[thread_idx][i].x = xavg;
-	    _aggregates[thread_idx][i].y = yavg;
+	    _threadsums[thread_idx][i].x = xavg;
+	    _threadsums[thread_idx][i].y = yavg;
 	}
     }
 }
@@ -262,8 +285,8 @@ void aggregate_each_thread() {
     int i, j;
     for (i = 0; i < _numthreads; i++) {
 	for (j = 0; j < _k; j++) {
-	    _tmpcenters[j].x += (_aggregates[i][j].x / _numthreads);
-	    _tmpcenters[j].y += (_aggregates[i][j].y / _numthreads);
+	    _tmpcenters[j].x += (_threadsums[i][j].x / _numthreads);
+	    _tmpcenters[j].y += (_threadsums[i][j].y / _numthreads);
 	}
     }
 }
@@ -328,7 +351,10 @@ void spawn_worker_threads() {
     }
 }
 
-/* After the algorithm has converged, print the centers */
+/* 
+ * After the algorithm has converged, print
+ * the centers
+ */
 void print_centers() {
     printf("Converged in %d iterations (max=%d)\n", _itr, _max_itr);
 
@@ -368,17 +394,15 @@ void main (int argc, char *const *argv) {
     init_points();
     init_threads();
     init_centers();
-    init_aggregates();
+    init_threadsums();
 
     spawn_worker_threads();
     pthread_barrier_wait(&_barrierC);
     print_centers();
 
-    free(_inputname);
-    free(_centers);
-    free(_tmpcenters);
-    free(_points);
-    free(_threads);
-    free_aggregates();
+    free_points();
+    free_threads();
+    free_centers();
+    free_threadsums();
     exit(EXIT_SUCCESS);
 }
