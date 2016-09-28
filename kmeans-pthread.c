@@ -77,20 +77,6 @@ void free_aggregates() {
 }
 
 /*
- * Reset the 2D array for per-thread
- * averaging
- */
-void reset_aggregates() {
-    int i, j;
-    for (i = 0; i < _numthreads; i++) {
-	for (j = 0; j < _k; j++) {
-	    _aggregates[i][j].x = 0;
-	    _aggregates[i][j].y = 0;
-	}
-    }
-}
-
-/*
  * Reset the per-iteration array
  * of centers
  */
@@ -291,7 +277,6 @@ void *kmeans(void *idx_ptr) {
     int end = (idx + 1) * (_numpoints / _numthreads);
     
     do {
-	reset_aggregates();
 	reset_tmpcenters();
 	
 	/* Cluster the points and compute the centers */
