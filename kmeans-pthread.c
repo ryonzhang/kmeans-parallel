@@ -30,7 +30,7 @@ char*             _inputname;          /* Input filename to read from */
 Vector*           _centers;            /* Cluster centers */
 Vector*           _tmpcenters;         /* Temporary cluster centers */
 Vector*           _points;             /* 2D data points */
-Vector**          _threadsums;         /* 2D array for er-thread cluster sums */
+Vector**          _partial_sums;         /* 2D array for er-thread cluster sums */
 pthread_t*        _threads;            /* pthreads used for averaging */
 
 
@@ -138,12 +138,12 @@ void init_centers() {
  * Initialize the 2D array for per-thread
  * cluster sums
  */
-void init_threadsums() {
-    _threadsums = malloc(sizeof(Vector *) * _numthreads);
+void init_partial_sums() {
+    _partial_sums = malloc(sizeof(Vector *) * _numthreads);
 
     int i;
     for (i = 0; i < _numthreads; i++) {
-	_threadsums[i] = malloc(sizeof(Vector) * _k);
+	_partial_sums[i] = malloc(sizeof(Vector) * _k);
     }
 }
 
@@ -174,13 +174,13 @@ void free_centers() {
  * Free the 2D array for per-thread 
  * cluster sums
  */
-void free_threadsums() {
+void free_partial_sums() {
     int i;
     for (i = 0; i < _numthreads; i++) {
-	free(_threadsums[i]);
+	free(_partial_sums[i]);
     }
 
-    free(_threadsums);
+    free(_partial_sums);
 }
 
 /*
@@ -246,13 +246,13 @@ void average_each_cluster(int thread_idx) {
     /* Average each cluster and update their centers */
     for (i = 0; i < _k; i++) {
 	if (counts[i] == 0) {
-	    _threadsums[thread_idx][i].x = 0;
-	    _threadsums[thread_idx][i].y = 0;
+	    _partial_sums[thread_idx][i].x = 0;
+	    _partial_sums[thread_idx][i].y = 0;
 	} else {
 	    double xavg = xsums[i] / counts[i];
 	    double yavg = ysums[i] / counts[i];
-	    _threadsums[thread_idx][i].x = xavg;
-	    _threadsums[thread_idx][i].y = yavg;
+	    _partial_sums[thread_idx][i].x = xavg;
+	    _partial_sums[thread_idx][i].y = yavg;
 	}
     }
 }
@@ -285,8 +285,8 @@ void aggregate_each_thread() {
     int i, j;
     for (i = 0; i < _numthreads; i++) {
 	for (j = 0; j < _k; j++) {
-	    _tmpcenters[j].x += (_threadsums[i][j].x / _numthreads);
-	    _tmpcenters[j].y += (_threadsums[i][j].y / _numthreads);
+	    _tmpcenters[j].x += (_partial_sums[i][j].x / _numthreads);
+	    _tmpcenters[j].y += (_partial_sums[i][j].y / _numthreads);
 	}
     }
 }
@@ -394,7 +394,7 @@ void main (int argc, char *const *argv) {
     init_points();
     init_threads();
     init_centers();
-    init_threadsums();
+    init_partial_sums();
 
     spawn_worker_threads();
     pthread_barrier_wait(&_barrierC);
@@ -403,6 +403,6 @@ void main (int argc, char *const *argv) {
     free_points();
     free_threads();
     free_centers();
-    free_threadsums();
+    free_partial_sums();
     exit(EXIT_SUCCESS);
 }
