@@ -128,17 +128,25 @@ void init_centers() {
 }
 
 /*
- * Initialize the 2D array for per-thread
+ * Initialize the 2D array of per-thread
  * cluster sums
  */
 void init_partial_sums() {
-    _partial_sums = malloc(sizeof(Vector *) * _numthreads);
-    _partial_sums_counts = malloc(sizeof(int *) * _numthreads);
+    int i, j;
 
-    int i;
+    _partial_sums = (Vector **) malloc(sizeof(Vector *) * _numthreads);
+    _partial_sums_counts = (int **) malloc(sizeof(int *) * _numthreads);
     for (i = 0; i < _numthreads; i++) {
-	_partial_sums[i] = malloc(sizeof(Vector) * _k);
-	_partial_sums_counts[i] = malloc(sizeof(int) * _k);
+	_partial_sums[i] = (Vector *) malloc(sizeof(Vector) * _k);
+	_partial_sums_counts[i] = (int *) malloc(sizeof(int) * _k);
+    }
+
+    for (i = 0; i < _numthreads; i++) {
+	for (j = 0; j < _k; j++) {
+	    _partial_sums[i][j].x = 0;
+	    _partial_sums[i][j].y = 0;
+	    _partial_sums_counts[i][j] = 0;
+	}
     }
 }
 
@@ -175,7 +183,6 @@ void free_partial_sums() {
 	free(_partial_sums[i]);
 	free(_partial_sums_counts[i]);
     }
-
     free(_partial_sums);
     free(_partial_sums_counts);
 }
@@ -192,10 +199,14 @@ void reset_tmpcenters() {
     }
 }
 
+/* 
+ * Reset the 2D array of per-thread
+ * cluster sums
+ */
 void reset_partial_sums() {
     int i, j;
     for (i = 0; i < _numthreads; i++) {
-	for (j = 0; j < _numthreads; j++) {
+	for (j = 0; j < _k; j++) {
 	    _partial_sums[i][j].x = 0;
 	    _partial_sums[i][j].y = 0;
 	    _partial_sums_counts[i][j] = 0;
@@ -214,8 +225,7 @@ int find_nearest_center(Vector *point) {
     int i;
     for (i = 0; i < _k; i++) {
 	Vector center = _centers[i];
-	double d = sqrt(pow(center.x - point->x, 2.0)
-			       + pow(center.y - point->y, 2.0));
+	double d = sqrt(pow(center.x - point->x, 2.0) + pow(center.y - point->y, 2.0));
 	if (d < distance) {
 	    distance = d;
 	    cluster_idx = i;
@@ -283,6 +293,20 @@ int centers_changed() {
     return changed;
 }
 
+/* 
+ * After the algorithm has converged, print
+ * the centers
+ */
+void print_centers() {
+    printf("Converged in %d iterations (max=%d)\n", _itr, _max_itr);
+
+    int j;
+    for (j = 0; j < _k; j++) {
+	printf("Cluster %d center: x=%f, y=%f\n",
+	       j, _centers[j].x, _centers[j].y);
+    }
+}
+
 /*
  * Compute k-means and print out the centers
  */
@@ -301,7 +325,7 @@ void *kmeans(void *thread_id_ptr) {
 	    _partial_sums_counts[thread_id][cluster_idx] += 1;
 	}
 	average_each_cluster(thread_id);
-	
+
 	/* Aggregate the work of each pthread and check for convergence */
 	pthread_barrier_wait(&_barrierA);
 	if (thread_id == 0) {
@@ -344,20 +368,6 @@ void spawn_worker_threads() {
 	    fprintf(stderr, "Couldn't set the affinity of a pthread\n");
 	    exit(EXIT_FAILURE);
 	}
-    }
-}
-
-/* 
- * After the algorithm has converged, print
- * the centers
- */
-void print_centers() {
-    printf("Converged in %d iterations (max=%d)\n", _itr, _max_itr);
-
-    int j;
-    for (j = 0; j < _k; j++) {
-	printf("Cluster %d center: x=%f, y=%f\n",
-	       j, _centers[j].x, _centers[j].y);
     }
 }
 
