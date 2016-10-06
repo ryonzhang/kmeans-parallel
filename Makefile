@@ -1,12 +1,10 @@
-all: kmeans-serial kmeans-pthread
+all:
+	cd serial && $(MAKE)
+	cd pthreads && $(MAKE)
 
-kmeans-serial: kmeans-serial.c
-	gcc kmeans-serial.c -g -lm -o kmeans-serial
+serial:
+	cd serial && $(MAKE)
 
-kmeans-pthread: kmeans-pthread.c
-	gcc kmeans-pthread.c -g -pthread -lm -o kmeans-pthread
-
-clean:
-	rm kmeans-serial
-	rm kmeans-pthread
+pthreads:
+	cd pthreads && $(MAKE)
 
