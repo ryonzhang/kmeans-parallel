@@ -1,0 +1,22 @@
+8 cores:
+Thread 0: 733506 ticks
+Thread 1: 733394 ticks
+Thread 2: 733311 ticks
+Thread 3: 733296 ticks
+Thread 4: 733271 ticks
+Thread 5: 733266 ticks
+Thread 6: 733216 ticks
+Thread 7: 733197 ticks
+
+4 cores:
+Thread 0: 1033345 ticks
+Thread 1: 1033262 ticks
+Thread 2: 1033190 ticks
+Thread 3: 1033152 ticks
+
+2 cores:
+Thread 0: 1711869 ticks
+Thread 1: 1711817 ticks
+
+1 core:
+Thread 0: 2966244 ticks

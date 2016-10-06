@@ -7,6 +7,7 @@
 #include <math.h>
 #include <float.h>
 #include <string.h>
+#include "info.h"
 
 
 typedef struct {    /* A 2D vector */
@@ -32,6 +33,7 @@ Vector*           _points;              /* 2D data points */
 Vector**          _partial_sums;        /* 2D array for per-thread cluster sums */
 int**             _partial_sums_counts; /* 2D array for per-thread counting of clusters */
 pthread_t*        _threads;             /* pthreads used for averaging */
+unsigned*         _ticks;               /* kmeans() tick count for each pthread */
 
 
 /*
@@ -151,6 +153,13 @@ void init_partial_sums() {
 }
 
 /*
+ * Intialize the array of tick counts for each thread
+ */
+void init_ticks() {
+    _ticks = (unsigned *) malloc(sizeof(unsigned) * _numthreads);
+}
+
+/*
  * Free the array of data points
  */
 void free_points() {
@@ -185,6 +194,13 @@ void free_partial_sums() {
     }
     free(_partial_sums);
     free(_partial_sums_counts);
+}
+
+/*
+ * Free the array of tick counts for each thread
+ */
+void free_ticks() {
+    free(_ticks);
 }
 
 /*
@@ -295,15 +311,21 @@ int centers_changed() {
 
 /* 
  * After the algorithm has converged, print
- * the centers
+ * the centers and the tick counnt for 
+ * each thread
  */
-void print_centers() {
-    printf("Converged in %d iterations (max=%d)\n", _itr, _max_itr);
+void print_results() {
+    int i;
 
-    int j;
-    for (j = 0; j < _k; j++) {
+    printf("Converged in %d iterations (max=%d)\n", _itr, _max_itr);
+    for (i = 0; i < _k; i++) {
 	printf("Cluster %d center: x=%f, y=%f\n",
-	       j, _centers[j].x, _centers[j].y);
+	       i, _centers[i].x, _centers[i].y);
+    }
+    printf("\n");
+
+    for (i = 0; i < _numthreads; i++) {
+	printf("Thread %d: %u ticks\n", i, _ticks[i]);
     }
 }
 
@@ -314,7 +336,8 @@ void *kmeans(void *thread_id_ptr) {
     int thread_id = *(int *) thread_id_ptr;
     int start = thread_id * (_numpoints / _numthreads);
     int end = (thread_id + 1) * (_numpoints / _numthreads);
-    
+
+    unsigned start_tick = ticks();
     do {
 	/* Cluster the points and compute the centers */
 	int cur, cluster_idx;
@@ -338,7 +361,9 @@ void *kmeans(void *thread_id_ptr) {
 	}
 	pthread_barrier_wait(&_barrierB);
     } while (!_convergence);
-
+    unsigned end_tick = ticks();
+    _ticks[thread_id] = end_tick - start_tick;
+    
     free(thread_id_ptr);
     pthread_barrier_wait(&_barrierC);
 }
@@ -401,14 +426,16 @@ void main (int argc, char *const *argv) {
     init_threads();
     init_centers();
     init_partial_sums();
+    init_ticks();
 
     spawn_worker_threads();
     pthread_barrier_wait(&_barrierC);
-    print_centers();
+    print_results();
 
     free_points();
     free_threads();
     free_centers();
     free_partial_sums();
+    free_ticks();
     exit(EXIT_SUCCESS);
 }
