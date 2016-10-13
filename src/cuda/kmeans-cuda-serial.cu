@@ -38,6 +38,7 @@ __host__ Vector zero_point() {
     Vector point;
     point.x = 0;
     point.y = 0;
+    point.cluster = 0;
 
     return point;
 }
@@ -47,13 +48,14 @@ __host__ Vector zero_point() {
  */
 __host__ void init_points(Vector *points, int numpoints) {
     cudaMalloc((Vector **) &_points, sizeof(Vector) * numpoints);
-    cudaMemcpy(&points, _points, sizeof(Vector) * numpoints, cudaMemcpyHostToDevice);
+    cudaMemcpy(_points, points, sizeof(Vector) * numpoints, cudaMemcpyHostToDevice);
+    //cudaMemcpy(&numpoints, &_numpoints, sizeof(int), cudaMemcpyHostToDevice);
 }
 
 /*
  * Copy the initial centers to the GPU
  */
-__host__ void init_centers(int k, Vector *points, int numpoints) {
+__host__ void init_centers(int k, Vector *points, int numpoints, double threshold) {
     Vector centers[k];
     Vector tmpcenters[k];
     int i;
@@ -67,12 +69,14 @@ __host__ void init_centers(int k, Vector *points, int numpoints) {
     cudaMalloc((Vector **) &_tmpcenters, sizeof(Vector) * k);
     cudaMemcpy(&centers, _centers, sizeof(Vector) * k, cudaMemcpyHostToDevice);
     cudaMemcpy(&tmpcenters, _tmpcenters, sizeof(Vector) * k, cudaMemcpyHostToDevice);
+    //cudaMemcpy(&k, &_k, sizeof(int), cudaMemcpyHostToDevice);
+    //cudaMemcpy(&threshold, &_threshold, sizeof(double), cudaMemcpyHostToDevice);
 }
 
 /*
  * Read data points from the input file
  */
-__host__ void init_dev(char *inputname) {
+__host__ void init_dev(int k, double threshold, char *inputname) {
     /* Open the input file */
     if (inputname == NULL) {
 	fprintf(stderr, "Must provide an input filename\n");
@@ -112,7 +116,7 @@ __host__ void init_dev(char *inputname) {
 
     /* Initialize the data structures on the GPU */
     init_points(points, numpoints);
-    init_centers(k, points, numpoints);
+    init_centers(k, points, numpoints, threshold);
     
     free(line);
     free(inputname);
@@ -132,7 +136,7 @@ __device__ void find_nearest_center(Vector *point) {
     double distance = DBL_MAX;
     int cluster_idx = 0;
     int i;
-    for (i = 0; i < k; i++) {
+    for (i = 0; i < _k; i++) {
 	Vector center = _centers[i];
 	double d = sqrt(pow(center.x - point->x, 2.0)
 			       + pow(center.y - point->y, 2.0));
@@ -150,26 +154,26 @@ __device__ void find_nearest_center(Vector *point) {
  */
 __device__ void average_each_cluster() {
     /* Initialize the arrays */
-    double *x_sums = (double *) malloc(sizeof(double) * k);
-    double *y_sums = (double *) malloc(sizeof(double) * k);
-    int *counts = (int *) malloc(sizeof(int) * k);
+    double *x_sums = (double *) malloc(sizeof(double) * _k);
+    double *y_sums = (double *) malloc(sizeof(double) * _k);
+    int *counts = (int *) malloc(sizeof(int) * _k);
     int i;
-    for (i = 0; i < k; i++) {
+    for (i = 0; i < _k; i++) {
 	x_sums[i] = 0;
 	y_sums[i] = 0;
 	counts[i] = 0;
     }
 
     /* Sum up and count each cluster */
-    for (i = 0; i < numpoints; i++) {
-	Vector point = points[i];
+    for (i = 0; i < _numpoints; i++) {
+	Vector point = _points[i];
 	x_sums[point.cluster] += point.x;
 	y_sums[point.cluster] += point.y;
 	counts[point.cluster] += 1;
     }
 
     /* Average each cluster and update their centers */
-    for (i = 0; i < k; i++) {
+    for (i = 0; i < _k; i++) {
 	if (counts[i] != 0) {
 	    double x_avg = x_sums[i] / counts[i];
 	    double y_avg = y_sums[i] / counts[i];
@@ -195,7 +199,7 @@ __device__ int centers_changed() {
     for (i = 0; i < _k; i++) {
 	double x_diff = fabs(_tmpcenters[i].x - _centers[i].x);
 	double y_diff = fabs(_tmpcenters[i].y - _centers[i].y);
-	if (x_diff > threshold || y_diff > threshold) {
+	if (x_diff > _threshold || y_diff > _threshold) {
 	    changed = 1;
 	}
 
@@ -216,7 +220,7 @@ __global__ void kmeans() {
     int max_itr = 10;
     do {
 	int i;
-	for (i = 0; i < numpoints; i++) {
+	for (i = 0; i < _numpoints; i++) {
 	    find_nearest_center(&_points[i]);
 	}
 
@@ -233,21 +237,24 @@ __global__ void kmeans() {
 }
 
 int main (int argc, char *const *argv) {
+    int k;
+    double threshold;
     char* inputname;
+    
     size_t len;
     int opt;
     while ((opt = getopt(argc, argv, "k:t:i:")) != -1) {
 	switch (opt) {
 	case 'k':
-	    _k = atoi(optarg);
+	    k = atoi(optarg);
 	    break;
 	case 't':
-	    _threshold = atof(optarg);
+	    threshold = atof(optarg);
 	    break;
 	case 'i':
 	    len = strlen(optarg);
 	    inputname = (char*) malloc(len + 1);
-	    strcpy(_inputname, optarg);
+	    strcpy(inputname, optarg);
 	    break;
 	default:
 	    fprintf(stderr, "Usage: %s [-k clusters] [-t threshold]"
@@ -261,7 +268,7 @@ int main (int argc, char *const *argv) {
 	exit(EXIT_FAILURE);
     }
     
-    init_dev(inputname);
+    init_dev(k, threshold, inputname);
     kmeans<<<1, 1>>>();
     cudaError_t cudaerr = cudaDeviceSynchronize();
     free_dev();
