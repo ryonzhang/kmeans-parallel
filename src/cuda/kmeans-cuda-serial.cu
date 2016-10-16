@@ -44,7 +44,7 @@ __host__ Vector zero_point()
     Vector point;
     point.x = 0;
     point.y = 0;
-
+    
     return point;
 }
 
@@ -163,8 +163,10 @@ __host__ void free_dev()
  * Find the nearest center for each point
  */
 __device__ int find_nearest_center(Vector *point,
-				   Vector *centers,
-				   int numcenters)
+                                   Vector *centers,
+                                   Vector *tmpcenters,
+                                   int *counts,
+                                   int numcenters)
 {
     double distance = DBL_MAX;
     int cluster_idx = 0;
@@ -178,6 +180,9 @@ __device__ int find_nearest_center(Vector *point,
             cluster_idx = i;
         } 
     }
+    tmpcenters[cluster_idx].x += point->x;
+    tmpcenters[cluster_idx].y += point->y;
+    counts[cluster_idx]++;
 
     return cluster_idx;
 }
@@ -187,9 +192,9 @@ __device__ int find_nearest_center(Vector *point,
  */
 __device__ void average_each_cluster(Vector *tmpcenters,
                                      int *counts,
-				     int numcenters,
-				     Vector *points,
-				     int numpoints)
+                                     int numcenters,
+                                     Vector *points,
+                                     int numpoints)
 {
     /* Average each cluster and update their centers */
     int i;
@@ -207,8 +212,8 @@ __device__ void average_each_cluster(Vector *tmpcenters,
  * Check if the centers have changed
  */
 __device__ int centers_changed(Vector *centers,
-			       Vector *tmpcenters,
-			       int numcenters,
+                               Vector *tmpcenters,
+                               int numcenters,
                                int threshold)
 {
     int changed = 0;
@@ -242,38 +247,32 @@ __device__ void print_results(int itr,
  * Compute k-means on the GPU and print out the centers
  */
 __global__ void kmeans(Vector *points,
-		       Vector *centers,
-		       Vector *tmpcenters,
+                       Vector *centers,
+                       Vector *tmpcenters,
                        int *counts,
                        int numcenters,
-		       int numpoints,
-		       int threshold)
+                       int numpoints,
+                       int threshold)
 {
     /* While the centers have moved, re-cluster 
         the points and compute the averages */
     int itr = 0;
     int max_itr = 10;
-    int cluster_idx = 0;
+    int i;
     do {
         reset_tmpcenters(tmpcenters, counts, numcenters);
-
-        int i;
-        for (i = 0; i < numpoints; i++) {
-            cluster_idx = find_nearest_center(&points[i], centers, numcenters);
-            tmpcenters[cluster_idx].x += points[i].x;
-            tmpcenters[cluster_idx].y += points[i].y;
-            counts[cluster_idx] += 1;
-        }
+        for (i = 0; i < numpoints; i++)
+            find_nearest_center(&points[i], centers, tmpcenters, counts, numcenters);
+        
         average_each_cluster(tmpcenters, counts, numcenters, points, numpoints);
-        itr++;
-    } while (itr < max_itr
+    } while (++itr < max_itr
              && centers_changed(centers, tmpcenters, numcenters, threshold));
 
     print_results(itr, max_itr, centers, numcenters);
 }
 
 int main (int argc,
-	  char *const *argv)
+          char *const *argv)
 {
     char* inputname;   
     size_t len;
@@ -305,7 +304,7 @@ int main (int argc,
     init_dev(inputname);
     kmeans<<<1, 1>>>(d_points, d_centers, d_tmpcenters, d_counts,
                      h_numcenters, h_numpoints, h_threshold);
-    
+
     cudaError_t cudaerr = cudaDeviceSynchronize();
     if (cudaerr != cudaSuccess) {
         fprintf(stderr, "Kernel launch failed with error \"%s\". \n",
