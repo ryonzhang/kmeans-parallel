@@ -10,6 +10,7 @@
 
 
 #define MAX_ITR 10          /* Maximum number of iterations */ 
+#define NUM_BLOCKS 10000    /* Number of blocks to use on the GPU */
 
 typedef struct {            /* 2D vector type */
     double x;
@@ -17,20 +18,20 @@ typedef struct {            /* 2D vector type */
 } Vector;
 
 
-__device__ int itr = 0;     /* Iteration count */
-int     h_numcenters = 4;   /* Host-side center count */
-int     h_numpoints;        /* Host-side point count */
-double  h_threshold = 0.05; /* Host-side threshold */
-Vector* h_centers;          /* Host-side centers */
-Vector* h_tmpcenters;       /* Host-side temporary centers */
-Vector* h_points;           /* Host-side points */
-int*    h_counts;           /* Host-side cluster counts */
-int     h_converged;        /* Host-side convergence boolean */
-Vector* d_centers;          /* Device-side centers */
-Vector* d_tmpcenters;       /* Device-side temporary centers */
-Vector* d_points;           /* Device-side points */
-int*    d_counts;           /* Device-side cluster counts */
-int*    d_converged;        /* Device-side convergence boolean */
+__device__ int itr = 0;      /* Iteration count */
+int      h_numcenters = 4;   /* Host-side center count */
+int      h_numpoints;        /* Host-side point count */
+double   h_threshold = 0.05; /* Host-side threshold */
+Vector*  h_points;           /* Host-side points */
+Vector*  h_centers;          /* Host-side centers */
+Vector*  h_tmpcenters;       /* Host-side temporary centers */
+int      h_converged;        /* Host-side convergence boolean */
+Vector*  d_points;           /* Device-side points */
+Vector*  d_centers;          /* Device-side centers */
+Vector*  d_tmpcenters;       /* Device-side temporary centers */
+int*     d_converged;        /* Device-side convergence boolean */
+Vector** d_sums;             /* Device-side cluster sums */
+int**    d_counts;           /* Device-side cluster counts */
 
 /*
  * Return a random point
@@ -55,7 +56,7 @@ __host__ Vector zero_point()
 /*
  * Copy the points to the GPU
  */
-__host__ void init_points()
+__host__ void copy_points()
 {
     cudaMalloc((void **) &d_points, sizeof(Vector) * h_numpoints);
     cudaMemcpy(d_points, h_points, sizeof(Vector) * h_numpoints,
@@ -63,7 +64,7 @@ __host__ void init_points()
 }
 
 /*
- * Copy the initial centers to the GPU
+ * Initialize the centers
  */
 __host__ void init_centers()
 {
@@ -71,22 +72,35 @@ __host__ void init_centers()
     for (i = 0; i < h_numcenters; i++) {
         h_centers[i] = random_point();
         h_tmpcenters[i] = zero_point();
-        h_counts[i] = 0;
     }
 
     /* Copy the centers to the GPU */
     cudaMalloc((void **) &d_centers, sizeof(Vector) * h_numcenters);
     cudaMalloc((void **) &d_tmpcenters, sizeof(Vector) * h_numcenters);
-    cudaMalloc((void **) &d_counts, sizeof(int) * h_numcenters);
     cudaMemcpy(d_centers, h_centers, sizeof(Vector) * h_numcenters,
                cudaMemcpyHostToDevice);
     cudaMemcpy(d_tmpcenters, h_tmpcenters, sizeof(Vector) * h_numcenters,
                cudaMemcpyHostToDevice);
-    cudaMemcpy(d_counts, h_counts, sizeof(int) * h_numcenters,
-               cudaMemcpyHostToDevice);
 
     /* Initialize the device-side convergence boolean */
     cudaMalloc((void **) &d_converged, sizeof(int));
+}
+
+/*
+ * Initialize the cluster sums and counts
+ */
+__host__ void init_sums_counts()
+{
+    cudaMalloc((void **) &d_sums, sizeof(Vector *) * NUM_BLOCKS);
+    cudaMalloc((void **) &d_counts, sizeof(int *) * NUM_BLOCKS);
+ 
+    int i;
+    for (i = 0; i < NUM_BLOCKS; i++) {
+	cudaMalloc((void **) &d_sums[i], sizeof(Vector) * h_numcenters);
+	cudaMalloc((void **) &d_counts[i], sizeof(int) * h_numcenters);
+	cudaMemset(d_sums[i], 0, sizeof(Vector) * h_numcenters);
+	cudaMemset(d_counts[i], 0, sizeof(int) * h_numcenters);
+    }
 }
 
 /*
@@ -135,7 +149,7 @@ __host__ void init_dev(char *inputname)
     h_counts = (int *) malloc(sizeof(Vector) * h_numcenters);
     
     /* Initialize the data structures on the GPU */
-    init_points();
+    copy_points();
     init_centers();
 
     free(line);
@@ -148,19 +162,19 @@ __host__ void init_dev(char *inputname)
 }
 
 /*
- * Reset the temporary centers and counts
+ *
  */
-__device__ void reset_tmpcenters(Vector *tmpcenters,
-                                 int *counts,
-                                 int numcenters)
+__host__ void free_sums_counts()
 {
     int i;
-    for (i = 0; i < numcenters; i++) {
-        tmpcenters[i].x = 0;
-        tmpcenters[i].y = 0;
-        counts[i] = 0;
+    for (i = 0; i < NUM_BLOCKS; i++) {
+	cudaFree(d_sums[i]);
+	cudaFree(d_counts[i]);
     }
-}
+
+    cudaFree(d_sums);
+    cudaFree(d_counts);
+} 
 
 /*
  * Free the device resources
@@ -170,6 +184,20 @@ __host__ void free_dev()
     cudaFree(d_centers);
     cudaFree(d_tmpcenters);
     cudaFree(d_points);
+}
+
+/*
+ * Reset the temporary centers and counts
+ */
+__device__ void reset_sums_counts(Vector **sums,
+				  int **counts,
+				  int numcenters)
+{
+    int i;
+    for (i = 0; i < NUM_BLOCKS; i++) {
+	memset(sums[i], 0, sizeof(Vector) * numcenters);
+	memset(counts[i], 0, sizeof(int) * numcenters);
+    }
 }
 
 /*
@@ -290,9 +318,9 @@ __host__ void kmeans(char *inputname)
 {
     init_dev(inputname);
     do {
-	kmeans_kernel<<<1, 1>>>(d_points, d_centers, d_tmpcenters, d_counts,
-				h_numcenters, h_numpoints, h_threshold,
-				d_converged);
+	kmeans_kernel<<<NUM_BLOCKS, 1>>>(d_points, d_centers, d_tmpcenters, d_counts,
+					 h_numcenters, h_numpoints, h_threshold,
+					 d_converged);
 	cudaMemcpy(&h_converged, d_converged, sizeof(int), cudaMemcpyDeviceToHost);
     } while(!h_converged);
 
