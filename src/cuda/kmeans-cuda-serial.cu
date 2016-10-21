@@ -93,7 +93,7 @@ __host__ void init_sums_counts()
 {
         cudaMalloc((void **) &d_sums, sizeof(Vector *) * NUM_BLOCKS);
         cudaMalloc((void **) &d_counts, sizeof(int *) * NUM_BLOCKS);
- 
+        
         int i;
         for (i = 0; i < NUM_BLOCKS; i++) {
                 cudaMalloc((void **) &d_sums[i], sizeof(Vector) * h_numcenters);
@@ -146,12 +146,12 @@ __host__ void init_dev(char *inputname)
         }
         h_centers = (Vector *) malloc(sizeof(Vector) * h_numcenters);
         h_tmpcenters = (Vector *) malloc(sizeof(Vector) * h_numcenters);
-    
+        
         /* Initialize the data structures on the GPU */
         copy_points();
         init_centers();
         init_sums_counts();
-
+        
         free(line);
         free(inputname);
         free(h_points);
@@ -304,17 +304,17 @@ __device__ void print_results(Vector *centers,
 }
 
 /*
- * Compute k-means on the device
+ * Compute k-means across NUM_BLOCKS blocks
  */
-__global__ void kmeans_kernel(Vector *points,
-                              Vector *centers,
-                              Vector *tmpcenters,
-                              Vector **sums,
-                              int **counts,
-                              int numcenters,
-                              int numpoints,
-                              int threshold,
-                              int *converged)
+__global__ void kmeans_work(Vector *points,
+                            Vector *centers,
+                            Vector *tmpcenters,
+                            Vector **sums,
+                            int **counts,
+                            int *converged,
+                            int numcenters,
+                            int numpoints,
+                            int threshold)
 {
         int start = blockIdx.x * (numpoints / NUM_BLOCKS);
         int end = (blockIdx.x + 1) * (numpoints / NUM_BLOCKS);
@@ -322,8 +322,19 @@ __global__ void kmeans_kernel(Vector *points,
         for (cur = start; cur < end; cur++)
                 find_nearest_center(&points[cur], centers, tmpcenters, sums, counts, numcenters);
         average_each_cluster(sums, counts, numcenters, numpoints);
+}
 
-        /* Synchronize here */
+/*
+ * Aggregate the work done by each block in kmeans_work()
+ */
+__global__ void kmeans_aggregate(Vector *centers,
+                                 Vector *tmpcenters,
+                                 Vector **sums,
+                                 int **counts,
+                                 int *converged,
+                                 int numcenters,
+                                 int threshold)
+{
         if (blockIdx.x == 0) {
                 aggregate_each_block(sums, tmpcenters, numcenters);
                 itr++;
@@ -333,7 +344,6 @@ __global__ void kmeans_kernel(Vector *points,
                         print_results(centers, numcenters);
                 reset_dev(tmpcenters, sums, counts, numcenters);
         }
-        /* Synchronize here */
 }
 
 /*
@@ -343,11 +353,15 @@ __host__ void kmeans(char *inputname)
 {
         init_dev(inputname);
         do {
-                kmeans_kernel<<<NUM_BLOCKS, 1>>>(d_points, d_centers,
-                                                 d_tmpcenters, d_sums,
-                                                 d_counts, h_numcenters,
-                                                 h_numpoints, h_threshold,
-                                                 d_converged);
+                kmeans_work<<<NUM_BLOCKS, 1>>>(d_points, d_centers,
+                                               d_tmpcenters, d_sums,
+                                               d_counts, d_converged,
+                                               h_numcenters, h_numpoints,
+                                               h_threshold);
+                kmeans_aggregate<<<1, 1>>>(d_centers, d_tmpcenters,
+                                           d_sums, d_counts, d_converged,
+                                           h_numcenters, h_threshold);
+                cudaDeviceSynchronize();
                 cudaMemcpy(&h_converged, d_converged, sizeof(int), cudaMemcpyDeviceToHost);
         } while(!h_converged);
         free_dev();
