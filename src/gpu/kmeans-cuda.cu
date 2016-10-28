@@ -347,7 +347,6 @@ __host__ void kmeans(char *inputname)
                 kmeans_check<<<1, 1>>>(d_centers, d_tmpcenters,
                                        d_counts, d_converged,
                                        _numcenters, _threshold);
-                cudaDeviceSynchronize();
                 cudaMemcpy(&h_converged, d_converged, sizeof(int), cudaMemcpyDeviceToHost);
         } while(!h_converged);
         unsigned end_gpu = ticks();
