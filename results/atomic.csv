@@ -1,5 +1,4 @@
-10,000,000 (x,y) points; 3 iterations
-"gpu-nonatomic",6889961
-"whole-nonatomic",11090607
-"gpu-atomic",5924340
-"whole-atomic",10100808
+gpu-nonatomic,6889961
+whole-nonatomic,11090607
+gpu-atomic,5924340
+whole-atomic,10100808
