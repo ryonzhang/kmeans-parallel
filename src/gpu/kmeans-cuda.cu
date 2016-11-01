@@ -316,8 +316,8 @@ __global__ void kmeans_work(Vector *points,
 
 	/* Find the nearest center for each point */
 	int cur;
-	int start = blockIdx.x * (numpoints / NUM_BLOCKS);
-        int end = (blockIdx.x + 1) * (numpoints / NUM_BLOCKS);
+	int start = blockIdx.x * (numpoints / (NUM_BLOCKS * NUM_THREADS));
+        int end = (blockIdx.x + 1) * (numpoints / (NUM_BLOCKS * NUM_THREADS));
         for (cur = start; cur < end; cur++)
                 find_nearest_center(&points[cur], centers, blockcenters, blockcounts, numcenters);
 	__syncthreads();
