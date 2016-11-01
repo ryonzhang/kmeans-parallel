@@ -11,7 +11,8 @@
 
 
 #define MAX_ITR 10            /* Maximum number of iterations */ 
-#define NUM_BLOCKS 10000      /* Number of blocks to use on the GPU */
+#define NUM_BLOCKS 1000       /* Number of blocks to use on the GPU */
+#define NUM_THREADS 100       /* Number of threads to use per block */
 
 typedef struct {              /* 2D vector type */
         float x;
@@ -214,8 +215,8 @@ __device__ void reset_tmpcenters_counts(Vector *tmpcenters,
  */
 __device__ void find_nearest_center(Vector *point,
                                     Vector *centers,
-                                    Vector *tmpcenters,
-                                    int *counts,
+                                    Vector *blockcenters,
+                                    int *blockcounts,
                                     int numcenters)
 {
         float distance = FLT_MAX;
@@ -230,9 +231,9 @@ __device__ void find_nearest_center(Vector *point,
                         cluster_idx = i;
                 } 
         }
-        atomicAdd(&tmpcenters[cluster_idx].x, point->x);
-        atomicAdd(&tmpcenters[cluster_idx].y, point->y);
-        atomicAdd(&counts[cluster_idx], 1);
+        atomicAdd(&blockcenters[cluster_idx].x, point->x);
+        atomicAdd(&blockcenters[cluster_idx].y, point->y);
+        atomicAdd(&blockcounts[cluster_idx], 1);
 }
 
 /*
@@ -292,7 +293,7 @@ __device__ void print_results(Vector *centers,
 }
 
 /*
- * Compute k-means across NUM_BLOCKS blocks
+ * Compute k-means across NUM_BLOCKS * NUM_THREADS threads
  */
 __global__ void kmeans_work(Vector *points,
                             Vector *centers,
@@ -303,11 +304,34 @@ __global__ void kmeans_work(Vector *points,
                             int numpoints,
                             float threshold)
 {
-        int start = blockIdx.x * (numpoints / NUM_BLOCKS);
+	/* Divide up the allocated shared memory */
+	extern __shared__ char shmem[];
+	Vector *blockcenters = (Vector *)shmem;
+	int *blockcounts = (int *)&blockcenters[numcenters];
+	if (threadIdx.x == 0) {
+		memset(blockcenters, 0, sizeof(Vector) * numcenters);
+		memset(blockcounts, 0, sizeof(int) * numcenters);
+	}
+	__syncthreads();
+
+	/* Find the nearest center for each point */
+	int cur;
+	int start = blockIdx.x * (numpoints / NUM_BLOCKS);
         int end = (blockIdx.x + 1) * (numpoints / NUM_BLOCKS);
-        int cur;
         for (cur = start; cur < end; cur++)
-                find_nearest_center(&points[cur], centers, tmpcenters, counts, numcenters);
+                find_nearest_center(&points[cur], centers, blockcenters, blockcounts, numcenters);
+	__syncthreads();
+
+	/* Update the global tmpcenters array */
+	if (threadIdx.x == 0) {
+		int cluster_idx;
+		for (cluster_idx = 0; cluster_idx < numcenters; cluster_idx++) {
+			atomicAdd(&tmpcenters[cluster_idx].x, blockcenters[cluster_idx].x);
+			atomicAdd(&tmpcenters[cluster_idx].y, blockcenters[cluster_idx].y);
+			atomicAdd(&counts[cluster_idx], blockcounts[cluster_idx]);
+		}
+	}
+	__syncthreads();
 }
 
 /*
@@ -338,12 +362,13 @@ __host__ void kmeans(char *inputname)
 	unsigned start_kmeans = ticks();
         init_kmeans(inputname);
 
+	int shmem_size = (sizeof(Vector) * _numcenters) + (sizeof(int) * _numcenters);
         unsigned start_gpu = ticks();
         do {
-                kmeans_work<<<NUM_BLOCKS, 1>>>(d_points, d_centers,
-                                               d_tmpcenters, d_counts,
-                                               d_converged, _numcenters,
-                                               _numpoints, _threshold);
+                kmeans_work<<<NUM_BLOCKS, NUM_THREADS, shmem_size>>>(d_points, d_centers,
+								     d_tmpcenters, d_counts,
+								     d_converged, _numcenters,
+								     _numpoints, _threshold);
                 kmeans_check<<<1, 1>>>(d_centers, d_tmpcenters,
                                        d_counts, d_converged,
                                        _numcenters, _threshold);
