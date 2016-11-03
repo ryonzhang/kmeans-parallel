@@ -11,8 +11,7 @@
 
 
 #define MAX_ITR 10            /* Maximum number of iterations */ 
-#define NUM_BLOCKS 1000       /* Number of blocks to use on the GPU */
-#define NUM_THREADS 100       /* Number of threads to use per block */
+#define THRESHOLD 0.0001      /* Threshold for convergence */
 
 typedef struct {              /* 2D vector type */
         float x;
@@ -20,10 +19,11 @@ typedef struct {              /* 2D vector type */
 } Vector;
 
 
-__device__ int itr = 0;       /* Iteration count */
-int      _numcenters = 4;     /* Host-side center count */
-int      _numpoints;          /* Host-side point count */
-float    _threshold = 0.0001; /* Host-side threshold */
+__device__ int itr = 0;       /* Current iteration */
+int      _numcenters = 4;     /* Number of centers */
+int      _numblocks = 1000;   /* Number of blocks to use on the GPU */
+int      _numthreads = 100;   /* Number of per-block threads */
+int      _numpoints;          /* Number of points */
 
 Vector*  h_points;            /* Host-side points */
 Vector*  h_centers;           /* Host-side centers */
@@ -261,15 +261,14 @@ __device__ void average_each_cluster(Vector *tmpcenters,
  */
 __device__ int centers_changed(Vector *centers,
                                Vector *tmpcenters,
-                               int numcenters,
-                               float threshold)
+                               int numcenters)
 {
         int changed = 0;
         int i;
         for (i = 0; i < numcenters; i++) {
                 float x_diff = fabs(tmpcenters[i].x - centers[i].x);
                 float y_diff = fabs(tmpcenters[i].y - centers[i].y);
-                if (x_diff > threshold || y_diff > threshold)
+                if (x_diff > THRESHOLD || y_diff > THRESHOLD)
                         changed = 1;
 
                 centers[i].x = tmpcenters[i].x;
@@ -302,7 +301,8 @@ __global__ void kmeans_work(Vector *points,
                             int *converged,
                             int numcenters,
                             int numpoints,
-                            float threshold)
+                            int numblocks,
+                            int numthreads)
 {
 	/* Divide up the allocated shared memory */
 	extern __shared__ char shmem[];
@@ -316,8 +316,8 @@ __global__ void kmeans_work(Vector *points,
 
 	/* Find the nearest center for each point */
 	int cur;
-	int start = blockIdx.x * (numpoints / (NUM_BLOCKS * NUM_THREADS));
-        int end = (blockIdx.x + 1) * (numpoints / (NUM_BLOCKS * NUM_THREADS));
+	int start = blockIdx.x * (numpoints / (numblocks * numthreads));
+        int end = (blockIdx.x + 1) * (numpoints / (numblocks * numthreads));
         for (cur = start; cur < end; cur++)
                 find_nearest_center(&points[cur], centers, blockcenters, blockcounts, numcenters);
 	__syncthreads();
@@ -341,13 +341,12 @@ __global__ void kmeans_check(Vector *centers,
                              Vector *tmpcenters,
                              int *counts,
                              int *converged,
-                             int numcenters,
-                             float threshold)
+                             int numcenters)
 { 
         average_each_cluster(tmpcenters, counts, numcenters);
         itr++;
                 
-        *converged = itr >= MAX_ITR || !centers_changed(centers, tmpcenters, numcenters, threshold);
+        *converged = itr >= MAX_ITR || !centers_changed(centers, tmpcenters, numcenters);
         if (*converged)
                 print_results(centers, numcenters);
 
@@ -365,13 +364,14 @@ __host__ void kmeans(char *inputname)
 	int shmem_size = (sizeof(Vector) * _numcenters) + (sizeof(int) * _numcenters);
         unsigned start_gpu = ticks();
         do {
-                kmeans_work<<<NUM_BLOCKS, NUM_THREADS, shmem_size>>>(d_points, d_centers,
+                kmeans_work<<<_numblocks, _numthreads, shmem_size>>>(d_points, d_centers,
 								     d_tmpcenters, d_counts,
 								     d_converged, _numcenters,
-								     _numpoints, _threshold);
+								     _numpoints, _numblocks,
+                                                                     _numthreads);
                 kmeans_check<<<1, 1>>>(d_centers, d_tmpcenters,
                                        d_counts, d_converged,
-                                       _numcenters, _threshold);
+                                       _numcenters);
                 cudaMemcpy(&h_converged, d_converged, sizeof(int), cudaMemcpyDeviceToHost);
         } while(!h_converged);
         unsigned end_gpu = ticks();
@@ -385,31 +385,32 @@ __host__ void kmeans(char *inputname)
 int main (int argc,
           char *const *argv)
 {
-        char* inputname;   
-        size_t len;
+        /* Parse the input filename */
+        if (argc < 2) {
+                fprintf(stderr, "Must specify a filename");
+                exit(EXIT_FAILURE);
+        }
+        size_t len = strlen(argv[1]);
+        char *inputname = (char *)malloc(len + 1);
+        strcpy(inputname, argv[1]);
+
+        /* Parse the options */
         int opt;
-        while ((opt = getopt(argc, argv, "k:t:i:")) != -1) {
+        while ((opt = getopt(argc, argv, "k:b:t:")) != -1) {
                 switch (opt) {
                 case 'k':
                         _numcenters = atoi(optarg);
                         break;
-                case 't':
-                        _threshold = atof(optarg);
+                case 'b':
+                        _numblocks = atoi(optarg);
                         break;
-                case 'i':
-                        len = strlen(optarg);
-                        inputname = (char*) malloc(len + 1);
-                        strcpy(inputname, optarg);
+                case 't':
+                        _numthreads = atoi(optarg);
                         break;
                 default:
-                        fprintf(stderr, "Usage: %s [-k clusters] [-t threshold]"
-                                " [-i inputfile]\n", argv[0]);
+                        fprintf(stderr, "Not a valid option");
                         exit(EXIT_FAILURE);
                 }
-        }
-        if (inputname == NULL) {
-                fprintf(stderr, "Must provide a valid input filename\n");
-                exit(EXIT_FAILURE);
         }
     
         kmeans(inputname);
