@@ -327,7 +327,7 @@ __global__ void kmeans_work(Vector *points,
 	} else {
 		start = curthread * (numpoints / totalthreads); 
 		if (numpoints % totalthreads != 0 && curthread == totalthreads - 1)
-			end = numpoints - 1;
+			end = numpoints;
 		else
 			end = (curthread + 1) * (numpoints / totalthreads);
 	}
