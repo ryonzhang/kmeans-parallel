@@ -304,20 +304,36 @@ __global__ void kmeans_work(Vector *points,
                             int numblocks,
                             int numthreads)
 {
-	/* Divide up the allocated shared memory */
-	extern __shared__ char shmem[];
+	extern __shared__ char shmem[]; /* Shared memory */
 	Vector *blockcenters = (Vector *)shmem;
 	int *blockcounts = (int *)&blockcenters[numcenters];
+	int totalthreads = numblocks * numthreads; /* Total number of threads */
+
 	if (threadIdx.x == 0) {
 		memset(blockcenters, 0, sizeof(Vector) * numcenters);
 		memset(blockcounts, 0, sizeof(int) * numcenters);
 	}
 	__syncthreads();
 
+	/* Set the starting index and ending index for each thread */
+	int start, end;
+	int curthread = (blockIdx.x * numthreads) + threadIdx.x;
+	if (curthread > numpoints)
+		return;
+
+	if (numpoints < totalthreads) {
+		start = curthread;
+		end = curthread + 1;
+	} else {
+		start = curthread * (numpoints / totalthreads); 
+		if (numpoints % totalthreads != 0 && curthread == totalthreads - 1)
+			end = numpoints - 1;
+		else
+			end = (curthread + 1) * (numpoints / totalthreads);
+	}
+
 	/* Find the nearest center for each point */
 	int cur;
-	int start = blockIdx.x * (numpoints / (numblocks * numthreads));
-        int end = (blockIdx.x + 1) * (numpoints / (numblocks * numthreads));
         for (cur = start; cur < end; cur++)
                 find_nearest_center(&points[cur], centers, blockcenters, blockcounts, numcenters);
 	__syncthreads();
@@ -342,7 +358,7 @@ __global__ void kmeans_check(Vector *centers,
                              int *counts,
                              int *converged,
                              int numcenters)
-{ 
+{
         average_each_cluster(tmpcenters, counts, numcenters);
         itr++;
                 
